@@ -1,6 +1,11 @@
 package com.droidcon.boston2019.facialrecognition
 
+import android.os.Bundle
 import android.util.Log
+import androidx.lifecycle.Observer
+import androidx.lifecycle.ViewModelProviders
+import com.droidcon.boston2019.facialrecognition.classify.automl.CloudAutoMLViewModel
+import com.droidcon.boston2019.facialrecognition.classify.common.*
 import com.droidcon.boston2019.facialrecognition.detect.mlkit.FaceDetector
 import com.droidcon.boston2019.facialrecognition.detect.mlkit.FaceGraphic
 import com.droidcon.boston2019.facialrecognition.detect.mlkit.FrameMetadata
@@ -16,6 +21,38 @@ class MLKitActivity : AbstractActivity() {
     }
 
     private var mCameraSource: MLCameraSource? = null
+    private lateinit var mViewModel: CloudAutoMLViewModel
+
+    override fun onCreate(icicle: Bundle?) {
+        super.onCreate(icicle)
+
+        mViewModel = ViewModelProviders
+            .of(this)
+            .get(CloudAutoMLViewModel::class.java)
+
+        mViewModel.subscribeClassifications()
+            .observe(this, Observer<Resource<FaceClassification, Throwable>> { resource ->
+                when (resource) {
+                    is LoadingResource -> {
+                        // Show loading indicator for given face.
+                        val faceId = resource.data?.faceId
+                        faceId?.let {id ->
+                            (mGraphicOverlay.find(id) as? FaceGraphic)?.setName("Classifying...")
+                        }
+                    }
+                    is SuccessResource -> {
+                        val faceId = resource.data.faceId
+                        val name = resource.data.name
+                        val score = resource.data.confidence
+                        (mGraphicOverlay.find(faceId) as? FaceGraphic)?.setName("$name (${"%.2f".format(score)})")
+                    }
+                    is ErrorResource -> {
+                        // Just print the stack trace, ideally show a dialog.
+                        resource.errorData?.printStackTrace()
+                    }
+                }
+            })
+    }
 
     /**
      * Creates and starts the camera.
@@ -48,6 +85,8 @@ class MLKitActivity : AbstractActivity() {
 
                                     mGraphicOverlay.add(faceGraphic)
 
+                                    // Lets try and find out who this face belongs to
+                                    mViewModel.classify(face.trackingId, frameData.convertToByteArray(frameMetadata))
                                 } else {
                                     // We have an existing face, update its position.
                                     existingFace.updateFace(face)
